@@ -8,7 +8,7 @@ from db import *
 
 TOKEN = "8168498060:AAEq5jx_dDVrqWxukCmux4Lzha5CKk7aAY4"
 
-ADMIN_IDS = ["8583137173"]  # admin telegram ID
+ADMIN_IDS = ["8583137173"]
 
 CHANNELS = [
     "@otp_z0ne",
@@ -36,20 +36,20 @@ def menu():
         [InlineKeyboardButton("📢 Join 4", url="https://t.me/vtkqo")],
         [InlineKeyboardButton("📢 Join 5", url="https://t.me/JMB_CODER")],
         [InlineKeyboardButton("▶️ YouTube", url=YOUTUBE_URL)],
-        [InlineKeyboardButton("👍 I Subscribed YouTube", callback_data="yt_done")],
-        [InlineKeyboardButton("🔁 Verify All", callback_data="verify")],
+        [InlineKeyboardButton("👍 I Subscribed YouTube", callback_data="yt")],
+        [InlineKeyboardButton("🔁 Verify", callback_data="verify")],
         [InlineKeyboardButton("💰 Wallet", callback_data="wallet")],
-        [InlineKeyboardButton("📣 Referral Link", callback_data="ref")],
+        [InlineKeyboardButton("📣 Referral", callback_data="ref")],
         [InlineKeyboardButton("💵 Withdraw", callback_data="withdraw")]
     ])
 
 
-# ================= CHECK CHANNEL JOIN ====================
+# ================= CHECK ====================
 
-def check_channels(user_id, context):
+def joined_all(uid, bot):
     for ch in CHANNELS:
         try:
-            m = context.bot.get_chat_member(ch, user_id)
+            m = bot.get_chat_member(ch, uid)
             if m.status not in ["member", "administrator", "creator"]:
                 return False
         except:
@@ -60,119 +60,109 @@ def check_channels(user_id, context):
 # ================= HANDLERS ====================
 
 def start(update, context):
-    chat_id = update.effective_chat.id
+    uid = update.effective_chat.id
     args = context.args
 
-    referred_by = None
+    ref = None
     if args and args[0].startswith("REF_"):
-        referred_by = args[0].replace("REF_", "")
-        if referred_by == str(chat_id):
-            referred_by = None
+        ref = args[0].replace("REF_", "")
+        if ref == str(uid):
+            ref = None
 
-    create_user(chat_id, referred_by)
+    create_user(uid, ref)
 
-    context.bot.send_message(
-        chat_id,
-        "🔥 Welcome!\nEarn ₹10 per verified referral!",
-        reply_markup=menu()
-    )
+    update.message.reply_text("🔥 Welcome!", reply_markup=menu())
 
 
-def button(update, context):
+def callback(update, context):
     q = update.callback_query
-    chat_id = q.message.chat.id
-    user_id = q.from_user.id
+    uid = q.from_user.id
     q.answer()
 
-    data = q.data
-
-    if data == "yt_done":
-        user_youtube[user_id] = True
-        context.bot.send_message(chat_id, "✅ YouTube Confirmed!")
+    if q.data == "yt":
+        user_youtube[uid] = True
+        q.message.reply_text("👍 YouTube Done!")
         return
 
-    if data == "verify":
-        if check_channels(user_id, context) and user_youtube.get(user_id, False):
-            row = get_user(user_id)
-
+    if q.data == "verify":
+        if joined_all(uid, context.bot) and user_youtube.get(uid, False):
+            row = get_user(uid)
             if row and row[2] == 0:
-                mark_verified(user_id)
+                mark_verified(uid)
                 if row[1]:
                     credit_referral(row[1])
 
-            context.bot.send_message(chat_id, "🎉 Verified!")
+            q.message.reply_text("🎉 Verified!")
         else:
-            context.bot.send_message(chat_id, "❌ Complete all steps!")
+            q.message.reply_text("❌ Complete all steps!")
         return
 
-    if data == "wallet":
-        bal = get_balance(user_id)
-        context.bot.send_message(chat_id, f"💰 Balance: ₹{bal}")
+    if q.data == "wallet":
+        bal = get_balance(uid)
+        q.message.reply_text(f"💰 Balance: ₹{bal}")
         return
 
-    if data == "ref":
-        link = f"https://t.me/{context.bot.username}?start=REF_{user_id}"
-        context.bot.send_message(chat_id, f"📣 Your Link:\n{link}")
+    if q.data == "ref":
+        link = f"https://t.me/{context.bot.username}?start=REF_{uid}"
+        q.message.reply_text(f"📣 Your Link:\n{link}")
         return
 
-    if data == "withdraw":
-        bal = get_balance(user_id)
+    if q.data == "withdraw":
+        bal = get_balance(uid)
         if bal < 100:
-            context.bot.send_message(chat_id, "❌ Minimum ₹100 required!")
+            q.message.reply_text("❌ Minimum ₹100")
             return
 
-        context.bot.send_message(chat_id, "Send UPI ID:")
-        context.user_data["awaiting_upi"] = True
+        q.message.reply_text("💳 Send UPI ID:")
+        context.user_data["wait_upi"] = True
         return
 
-    if data.startswith("approve_"):
-        wid = data.replace("approve_", "")
+    # admin approve/reject
+    if q.data.startswith("approve_"):
+        wid = q.data.replace("approve_", "")
         approve_withdraw(wid)
-        context.bot.send_message(chat_id, "✔️ Approved!")
+        q.message.reply_text("✔️ Approved")
         return
 
-    if data.startswith("reject_"):
-        wid = data.replace("reject_", "")
+    if q.data.startswith("reject_"):
+        wid = q.data.replace("reject_", "")
         reject_withdraw(wid)
-        context.bot.send_message(chat_id, "❌ Rejected!")
+        q.message.reply_text("❌ Rejected")
         return
 
 
-def message_handler(update, context):
-    user_id = update.effective_chat.id
+def msg(update, context):
+    uid = update.effective_chat.id
 
-    if context.user_data.get("awaiting_upi"):
+    if context.user_data.get("wait_upi"):
         upi = update.message.text
-        amt = get_balance(user_id)
+        amt = get_balance(uid)
 
-        create_withdraw(user_id, amt, upi)
+        create_withdraw(uid, amt, upi)
 
         for admin in ADMIN_IDS:
             context.bot.send_message(
                 admin,
-                f"🔔 Withdraw Request\nUser: {user_id}\nAmount: ₹{amt}\nUPI: {upi}",
+                f"🔔 Withdraw Request\nUser: {uid}\nAmount: ₹{amt}\nUPI: {upi}",
                 reply_markup=InlineKeyboardMarkup([
-                    [InlineKeyboardButton("Approve", callback_data=f"approve_{user_id}"),
-                     InlineKeyboardButton("Reject", callback_data=f"reject_{user_id}")]
+                    [InlineKeyboardButton("Approve", callback_data=f"approve_{uid}"),
+                     InlineKeyboardButton("Reject", callback_data=f"reject_{uid}")]
                 ])
             )
 
-        context.bot.send_message(user_id, "⌛ Waiting for approval...")
-        context.user_data["awaiting_upi"] = False
+        update.message.reply_text("⌛ Waiting for approval...")
+        context.user_data["wait_upi"] = False
 
 
 # ================= SETUP ====================
 
 def setup():
-    updater = Updater(TOKEN, use_context=True)
-    dp = updater.dispatcher
-
+    up = Updater(TOKEN, use_context=True)
+    dp = up.dispatcher
     dp.add_handler(CommandHandler("start", start))
-    dp.add_handler(CallbackQueryHandler(button))
-    dp.add_handler(MessageHandler(Filters.text, message_handler, pass_user_data=True))
-
-    return updater
-
+    dp.add_handler(CallbackQueryHandler(callback))
+    dp.add_handler(MessageHandler(Filters.text, msg, pass_user_data=True))
+    return up
 
 dispatcher = setup()
 
@@ -187,7 +177,7 @@ def webhook():
 
 @app.route("/")
 def home():
-    return "Bot running!"
+    return "Bot Running!"
 
 
 if __name__ == "__main__":
