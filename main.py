@@ -1,11 +1,13 @@
-import os, time
+import time
 from flask import Flask, request
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ChatMember
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler
+from telegram.ext import Updater, CommandHandler, CallbackQueryHandler, MessageHandler, Filters
 from db import *
 
-# CONFIG =============================
+# ================= CONFIG ====================
+
 TOKEN = "8168498060:AAEq5jx_dDVrqWxukCmux4Lzha5CKk7aAY4"
+
 ADMIN_IDS = ["8583137173"]
 
 CHANNELS = [
@@ -24,7 +26,9 @@ init_db()
 user_youtube = {}
 
 
-def make_keyboard():
+# ================= UI ====================
+
+def menu():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("📢 Join 1", url="https://t.me/otp_z0ne")],
         [InlineKeyboardButton("📢 Join 2", url="https://t.me/Alexx_network")],
@@ -36,9 +40,11 @@ def make_keyboard():
         [InlineKeyboardButton("🔁 Verify All", callback_data="verify")],
         [InlineKeyboardButton("💰 Wallet", callback_data="wallet")],
         [InlineKeyboardButton("📣 Referral Link", callback_data="ref")],
-        [InlineKeyboardButton("💵 Withdraw", callback_data="withdraw")],
+        [InlineKeyboardButton("💵 Withdraw", callback_data="withdraw")]
     ])
 
+
+# ================= FUNCTIONS ====================
 
 def check_channels(user_id, context):
     for ch in CHANNELS:
@@ -65,86 +71,91 @@ def start(update, context):
 
     context.bot.send_message(
         chat_id,
-        "🔥 Welcome to Referral Bot!\nComplete steps & earn ₹10 per referral!",
-        reply_markup=make_keyboard()
+        "🔥 Welcome!\nEarn ₹10 per verified referral!",
+        reply_markup=menu()
     )
 
 
 def button(update, context):
     q = update.callback_query
-    user = q.from_user
     chat_id = q.message.chat.id
+    user_id = q.from_user.id
     q.answer()
 
     data = q.data
 
     if data == "yt_done":
-        user_youtube[user.id] = True
+        user_youtube[user_id] = True
         context.bot.send_message(chat_id, "✅ YouTube Confirmed!")
+        return
 
-    elif data == "verify":
-        channels_ok = check_channels(user.id, context)
-        yt_ok = user_youtube.get(user.id, False)
+    if data == "verify":
+        channels_ok = check_channels(user_id, context)
+        yt_ok = user_youtube.get(user_id, False)
 
         if channels_ok and yt_ok:
-            row = get_user(user.id)
+            row = get_user(user_id)
             if row and row[2] == 0:
-                mark_verified(user.id)
+                mark_verified(user_id)
                 if row[1]:
                     credit_referral(row[1])
 
-            context.bot.send_message(chat_id, "🎉 Verified! Earned ₹10 to referrer!")
+            context.bot.send_message(chat_id, "🎉 Verified!")
         else:
-            context.bot.send_message(chat_id, "❌ Complete all steps first!")
+            context.bot.send_message(chat_id, "❌ Complete all steps!")
 
-    elif data == "wallet":
-        b = get_balance(user.id)
-        context.bot.send_message(chat_id, f"💰 Balance: ₹{b}")
+    if data == "wallet":
+        bal = get_balance(user_id)
+        context.bot.send_message(chat_id, f"💰 Balance: ₹{bal}")
 
-    elif data == "ref":
-        link = f"https://t.me/{context.bot.username}?start=REF_{user.id}"
-        context.bot.send_message(chat_id, f"📣 Share & Earn ₹10:\n\n{link}")
+    if data == "ref":
+        link = f"https://t.me/{context.bot.username}?start=REF_{user_id}"
+        context.bot.send_message(chat_id, f"📣 Your Link:\n{link}")
 
-    elif data == "withdraw":
-        b = get_balance(user.id)
-        if b < 100:
-            context.bot.send_message(chat_id, "❌ Minimum ₹100 required!")
+    if data == "withdraw":
+        bal = get_balance(user_id)
+        if bal < 100:
+            context.bot.send_message(chat_id, "❌ Minimum ₹100!")
             return
+
         context.bot.send_message(chat_id, "Send UPI ID:")
         context.user_data["awaiting_upi"] = True
-
-    elif data.startswith("approve_"):
-        wid = data.replace("approve_", "")
-        approve_withdraw(wid)
-        context.bot.send_message(chat_id, "Approved!")
         return
 
-    elif data.startswith("reject_"):
+    if data.startswith("approve_"):
+        wid = data.replace("approve_", "")
+        approve_withdraw(wid)
+        context.bot.send_message(chat_id, "Approved ✔️")
+        return
+
+    if data.startswith("reject_"):
         wid = data.replace("reject_", "")
         reject_withdraw(wid)
-        context.bot.send_message(chat_id, "Rejected!")
+        context.bot.send_message(chat_id, "Rejected ❌")
         return
 
 
 def message_handler(update, context):
     user_id = update.effective_chat.id
+
     if context.user_data.get("awaiting_upi"):
         upi = update.message.text
         amt = get_balance(user_id)
+
         create_withdraw(user_id, amt, upi)
 
         for admin in ADMIN_IDS:
             context.bot.send_message(
                 admin,
-                f"🔔 Withdraw Request\nUser: {user_id}\nAmount: ₹{amt}\nUPI: {upi}\n\nApprove?",
+                f"🔔 Withdraw Request\nUser: {user_id}\nAmount: ₹{amt}\nUPI: {upi}",
                 reply_markup=InlineKeyboardMarkup([
                     [InlineKeyboardButton("Approve", callback_data=f"approve_{user_id}"),
                      InlineKeyboardButton("Reject", callback_data=f"reject_{user_id}")]
                 ])
             )
 
-        context.user_data["awaiting_upi"] = False
         context.bot.send_message(user_id, "⌛ Waiting for approval!")
+        context.user_data["awaiting_upi"] = False
 
 
 def setup():
@@ -153,35 +164,13 @@ def setup():
 
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CallbackQueryHandler(button))
-    dp.add_handler(CommandHandler("admin", admin_panel))
-    dp.add_handler(MessageHandler(None, message_handler, pass_user_data=True))
+    dp.add_handler(MessageHandler(Filters.text, message_handler, pass_user_data=True))
 
     return updater
 
 
-def admin_panel(update, context):
-    chat_id = update.effective_chat.id
-    if str(chat_id) not in ADMIN_IDS:
-        return
-
-    rows = list_pending_withdrawals()
-    if not rows:
-        context.bot.send_message(chat_id, "No pending withdrawals.")
-        return
-
-    for row in rows:
-        wid, user_id, amount, upi = row
-        context.bot.send_message(
-            chat_id,
-            f"Pending:\nUser: {user_id}\nAmount: ₹{amount}\nUPI: {upi}",
-            reply_markup=InlineKeyboardMarkup([
-                [InlineKeyboardButton("Approve", callback_data=f"approve_{wid}"),
-                 InlineKeyboardButton("Reject", callback_data=f"reject_{wid}")]
-            ])
-        )
-
-
 dispatcher = setup()
+
 
 @app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
@@ -193,7 +182,7 @@ def webhook():
 
 @app.route("/")
 def home():
-    return "Bot running"
+    return "Bot running!"
 
 
 if __name__ == "__main__":
