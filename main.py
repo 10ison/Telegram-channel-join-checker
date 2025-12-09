@@ -1,20 +1,20 @@
 import sys
 import types
-import logging
-from flask import Flask, request
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, ChatMember
-from telegram.ext import Updater, CommandHandler, CallbackQueryHandler
-from telegram.ext import Dispatcher
-import os
 
-# ---------------- FIX FOR PYTHON 3.13 ----------------
+# fix imghdr error for Python 3.13
 fake_imghdr = types.ModuleType("imghdr")
 sys.modules["imghdr"] = fake_imghdr
-# -----------------------------------------------------
 
-TELEGRAM_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
+from flask import Flask, request
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    CallbackQueryHandler,
+    ContextTypes
+)
 
-# Channels / YouTube
+TOKEN = "8168498060:AAEq5jx_dDVrqWxukCmux4Lzha5CKk7aAY4"
 CHANNELS = [
     "https://t.me/otp_z0ne",
     "https://t.me/Alexx_network",
@@ -22,66 +22,63 @@ CHANNELS = [
     "https://t.me/vtkqo",
     "https://t.me/JMB_CODER",
 ]
-YOUTUBE_URL = "https://youtube.com/@bizzle.editor"
+YOUTUBE = "https://youtube.com/@bizzle.editor"
 
-# Flask server
+WEB_URL = "https://telegram-channel-join-checker.onrender.com"
+
 app = Flask(__name__)
-
-# Logger
-logging.basicConfig(level=logging.INFO)
+bot_app = ApplicationBuilder().token(TOKEN).build()
 
 
-# ---------------- TELEGRAM BOT START ----------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    buttons = [
+        [InlineKeyboardButton("🔗 Join Channels", callback_data="join")],
+        [InlineKeyboardButton("📺 Subscribe YouTube", url=YOUTUBE)],
+        [InlineKeyboardButton("✔️ Verify", callback_data="verify")]
+    ]
+    reply_markup = InlineKeyboardMarkup(buttons)
 
-def start(update: Update, context):
-    keyboard = []
-
-    for ch in CHANNELS:
-        keyboard.append([InlineKeyboardButton("Join Channel", url=ch)])
-
-    keyboard.append([InlineKeyboardButton("Subscribe YouTube", url=YOUTUBE_URL)])
-    keyboard.append([InlineKeyboardButton("Verify ✔️", callback_data="verify")])
-
-    update.message.reply_text(
-        "👇 Please join channels & subscribe then click verify",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(
+        "👋 Welcome!\n\nJoin all channels + subscribe YouTube then click Verify.",
+        reply_markup=reply_markup
     )
 
 
-def verify(update: Update, context):
-    user = update.effective_user
+async def join_channels(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = "👇 Join all channels:\n\n"
+    for c in CHANNELS:
+        text += f"🔗 {c}\n"
 
-    # Simple fake check (you can add real join check if admin rights)
-    update.callback_query.answer("Checking...")
+    await update.callback_query.message.reply_text(text)
 
-    update.callback_query.edit_message_text(
-        f"🎉 Verified! Welcome {user.first_name}\n\n💸 Earn Rs 10 per referral!"
+
+async def verify(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # real check here
+    await update.callback_query.message.reply_text(
+        "⏳ Checking...\n\n✔️ Verified! 🎉"
     )
 
 
-# ---------------- FLASK WEBHOOK ----------------
+bot_app.add_handler(CommandHandler("start", start))
+bot_app.add_handler(CallbackQueryHandler(join_channels, pattern="join"))
+bot_app.add_handler(CallbackQueryHandler(verify, pattern="verify"))
 
-@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
+
+@app.route(f"/{TOKEN}", methods=["POST"])
 def webhook():
-    update = Update.de_json(request.get_json(), updater.bot)
-    dispatcher.process_update(update)
+    bot_app.update_queue.put(request.json)
     return "ok"
 
 
 @app.route("/")
 def home():
-    return "BOT IS RUNNING!"
-
-
-# ---------------- MAIN ----------------
-
-updater = Updater(TELEGRAM_TOKEN, use_context=True)
-dispatcher = updater.dispatcher
-
-dispatcher.add_handler(CommandHandler("start", start))
-dispatcher.add_handler(CallbackQueryHandler(verify))
+    return "Bot is running!"
 
 
 if __name__ == "__main__":
-    PORT = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=PORT)
+    bot_app.run_webhook(
+        listen="0.0.0.0",
+        port=10000,
+        url_path=TOKEN,
+        webhook_url=f"{WEB_URL}/{TOKEN}"
+    )
