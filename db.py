@@ -1,78 +1,43 @@
 import sqlite3
 
-DB_NAME = "data.db"
-
+DB = "data.db"
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB)
     c = conn.cursor()
 
     c.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            user_id INTEGER PRIMARY KEY,
+            user_id TEXT UNIQUE,
             balance INTEGER DEFAULT 0,
-            referred_by INTEGER
-        );
-    """)
-
-    c.execute("""
-        CREATE TABLE IF NOT EXISTS referrals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            referrer_id INTEGER,
-            referred_id INTEGER,
-            completed INTEGER DEFAULT 0
-        );
+            ref TEXT
+        )
     """)
 
     conn.commit()
     conn.close()
 
 
-def add_user(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+def add_user(uid, ref=None):
+    conn = sqlite3.connect(DB)
+    try:
+        conn.execute("INSERT INTO users (user_id, ref) VALUES (?,?)", (uid, ref))
+    except:
+        pass
     conn.commit()
     conn.close()
 
 
-def set_referrer(user_id, referrer):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("UPDATE users SET referred_by=? WHERE user_id=?", (referrer, user_id))
+def add_balance(uid, amount):
+    conn = sqlite3.connect(DB)
+    conn.execute("UPDATE users SET balance = balance + ? WHERE user_id=?", (amount, uid))
     conn.commit()
     conn.close()
 
 
-def add_referral(referrer, referred):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("INSERT INTO referrals (referrer_id, referred_id) VALUES (?,?)", (referrer, referred))
-    conn.commit()
-    conn.close()
-
-
-def complete_referral(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-
-    # reward referral only once
-    c.execute("SELECT referrer_id FROM referrals WHERE referred_id=? AND completed=0", (user_id,))
+def get_balance(uid):
+    conn = sqlite3.connect(DB)
+    c = conn.execute("SELECT balance FROM users WHERE user_id=?", (uid,))
     row = c.fetchone()
-
-    if row:
-        referrer = row[0]
-        c.execute("UPDATE users SET balance = balance + 10 WHERE user_id=?", (referrer,))
-        c.execute("UPDATE referrals SET completed=1 WHERE referred_id=?", (user_id,))
-
-    conn.commit()
     conn.close()
-
-
-def get_balance(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
-    r = c.fetchone()
-    conn.close()
-    return r[0] if r else 0
+    return row[0] if row else 0
