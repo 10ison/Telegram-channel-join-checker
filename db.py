@@ -1,93 +1,90 @@
-import sqlite3, time
+import sqlite3
 
-DB = "data.db"
+DB_NAME = "data.db"
+
 
 def init_db():
-    conn = sqlite3.connect(DB)
-    conn.execute("""
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+
+    # user table
+    c.execute("""
         CREATE TABLE IF NOT EXISTS users (
-            telegram_id INTEGER PRIMARY KEY,
+            user_id INTEGER PRIMARY KEY,
             balance INTEGER DEFAULT 0,
-            referred_by INTEGER,
-            verified INTEGER DEFAULT 0,
-            created_at INTEGER
-        )
+            referred_by INTEGER NULL
+        );
     """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS withdrawals (
+
+    # referral tracking
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS referrals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            amount INTEGER,
-            upi TEXT,
-            status TEXT,
-            created_at INTEGER
-        )
+            referrer_id INTEGER,
+            referred_id INTEGER,
+            completed INTEGER DEFAULT 0
+        );
     """)
+
     conn.commit()
     conn.close()
 
-def get_user(telegram_id):
-    conn = sqlite3.connect(DB)
-    cur = conn.cursor()
-    cur.execute("SELECT balance, referred_by, verified FROM users WHERE telegram_id=?", (telegram_id,))
-    row = cur.fetchone()
-    conn.close()
-    return row
 
-def create_user(telegram_id, referred_by=None):
-    conn = sqlite3.connect(DB)
-    conn.execute(
-        "INSERT OR IGNORE INTO users (telegram_id, referred_by, created_at) VALUES (?,?,?)",
-        (telegram_id, referred_by, int(time.time()))
-    )
+def add_user(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+
+    c.execute("INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,))
+
     conn.commit()
     conn.close()
 
-def mark_verified(telegram_id):
-    conn = sqlite3.connect(DB)
-    conn.execute("UPDATE users SET verified=1 WHERE telegram_id=?", (telegram_id,))
+
+def set_referrer(user_id, referrer):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+
+    c.execute("UPDATE users SET referred_by=? WHERE user_id=?", (referrer, user_id))
+
     conn.commit()
     conn.close()
 
-def credit_referral(referrer_id):
-    conn = sqlite3.connect(DB)
-    conn.execute("UPDATE users SET balance = balance + 10 WHERE telegram_id=?", (referrer_id,))
+
+def add_referral(referrer, referred):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+
+    c.execute("INSERT INTO referrals (referrer_id, referred_id) VALUES (?, ?)", (referrer, referred))
+
     conn.commit()
     conn.close()
+
+
+def complete_referral(user_id):
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+
+    # mark referral done
+    c.execute("UPDATE referrals SET completed=1 WHERE referred_id=?", (user_id,))
+
+    # give balance
+    c.execute("""
+        UPDATE users 
+        SET balance = balance + 10
+        WHERE user_id = (SELECT referrer_id FROM referrals WHERE referred_id=?)
+    """, (user_id,))
+
+    conn.commit()
+    conn.close()
+
 
 def get_balance(user_id):
-    conn = sqlite3.connect(DB)
+    conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT balance FROM users WHERE telegram_id=?", (user_id,))
-    b = c.fetchone()
-    conn.close()
-    return b[0] if b else 0
 
-def create_withdraw(user_id, amount, upi):
-    conn = sqlite3.connect(DB)
-    conn.execute(
-        "INSERT INTO withdrawals (user_id, amount, upi, status, created_at) VALUES (?,?,?,'Pending',?)",
-        (user_id, amount, upi, int(time.time()))
-    )
-    conn.commit()
+    c.execute("SELECT balance FROM users WHERE user_id=?", (user_id,))
+    result = c.fetchone()
+
     conn.close()
 
-def list_pending_withdrawals():
-    conn = sqlite3.connect(DB)
-    cur = conn.cursor()
-    cur.execute("SELECT id, user_id, amount, upi FROM withdrawals WHERE status='Pending'")
-    rows = cur.fetchall()
-    conn.close()
-    return rows
-
-def approve_withdraw(id):
-    conn = sqlite3.connect(DB)
-    conn.execute("UPDATE withdrawals SET status='Approved' WHERE id=?", (id,))
-    conn.commit()
-    conn.close()
-
-def reject_withdraw(id):
-    conn = sqlite3.connect(DB)
-    conn.execute("UPDATE withdrawals SET status='Rejected' WHERE id=?", (id,))
-    conn.commit()
-    conn.close()
+    return result[0] if result else 0
